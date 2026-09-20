@@ -1,5 +1,6 @@
 // Import Express.js and Anthropic SDK
 const crypto = require('crypto');
+const https = require('https');
 const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk').default;
 
@@ -40,28 +41,49 @@ function verificarFirma(req) {
   return crypto.timingSafeEqual(bufferRecibido, bufferEsperado);
 }
 
-async function enviarMensajeWhatsApp(destinatario, texto) {
-  const url = `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`;
-  const respuesta = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${whatsappToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+function enviarMensajeWhatsApp(destinatario, texto) {
+  return new Promise((resolve, reject) => {
+    const cuerpo = JSON.stringify({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: destinatario,
       type: 'text',
       text: { preview_url: false, body: texto },
-    }),
-  });
+    });
 
-  const resultado = await respuesta.json().catch(() => ({}));
-  if (!respuesta.ok) {
-    console.error(`Meta respondió con HTTP ${respuesta.status}.`, JSON.stringify(resultado));
-  }
-  return resultado;
+    const req = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${graphVersion}/${phoneNumberId}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(cuerpo),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let resultado = {};
+          try { resultado = JSON.parse(data); } catch (_) { /* respuesta vacía o no-JSON */ }
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            console.error(`Meta respondió con HTTP ${res.statusCode}.`, data);
+          }
+          resolve(resultado);
+        });
+      },
+    );
+
+    req.on('error', (error) => {
+      console.error('Error de red enviando a WhatsApp:', error);
+      reject(error);
+    });
+
+    req.write(cuerpo);
+    req.end();
+  });
 }
 
 async function obtenerSesion(numero) {
@@ -112,7 +134,7 @@ async function procesarMensajeEntrante(numero, texto) {
     await enviarMensajeWhatsApp(
       numero,
       'Tuvimos un problema respondiendo tu pregunta. Intenta de nuevo en un momento.',
-    ).catch(() => {});
+    ).catch((err) => console.error('También falló el envío del mensaje de error:', err));
   }
 }
 
