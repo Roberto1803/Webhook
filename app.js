@@ -29,6 +29,15 @@ const anthropic = new Anthropic();
 // Sesión del agente por número de WhatsApp (en memoria; se reinicia si el dyno se reinicia).
 const sesionesPorNumero = new Map();
 
+// WhatsApp agrega un "1" extra a celulares mexicanos (52 1 XXXXXXXXXX) que no coincide
+// con el formato que se registra en la lista de destinatarios autorizados (52 XXXXXXXXXX).
+function normalizarNumeroMx(numero) {
+  if (/^521\d{10}$/.test(numero)) {
+    return '52' + numero.slice(3);
+  }
+  return numero;
+}
+
 function verificarFirma(req) {
   if (!appSecret) return true; // no bloquear si aún no se configuró el App Secret
   const firma = req.get('x-hub-signature-256');
@@ -170,7 +179,7 @@ app.post('/', (req, res) => {
       const mensajes = (cambio.value && cambio.value.messages) || [];
       for (const mensaje of mensajes) {
         if (mensaje.type === 'text') {
-          procesarMensajeEntrante(mensaje.from, mensaje.text.body);
+          procesarMensajeEntrante(normalizarNumeroMx(mensaje.from), mensaje.text.body);
         }
       }
     }
